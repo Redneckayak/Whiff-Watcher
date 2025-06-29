@@ -2,12 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
-import datetime
 import pandas as pd
+from datetime import datetime
 
 app = FastAPI()
 
-# Allow CORS for frontend use
+# Allow all CORS for frontend use
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,7 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Output model
+# Output models
 class PlayerRanking(BaseModel):
     name: str
     team: str
@@ -27,64 +27,58 @@ class PlayerRanking(BaseModel):
 class WhiffRankings(BaseModel):
     rankings: list[PlayerRanking]
 
-# Opening Day to Today
+# Headers to avoid 403 errors
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "text/csv",
+}
+
+# Get date range from Opening Day to today
 def get_date_range():
-    start = datetime.date(2025, 3, 20)
-    end = datetime.date.today()
-    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+    return "2025-03-20", datetime.today().strftime("%Y-%m-%d")
 
-# Fetch batter strikeout stats from Statcast
-def fetch_batter_k_data():
+# Fetch top 100 batters
+def fetch_top_batters():
     start, end = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=batter&hfGames=on&hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
-    print("Fetching batter CSV...")
-    df = pd.read_csv(url)
-    df = df[df['ab'] >= 200]
-    df = df.head(100)
-    batters = df[['player_name', 'team', 'k_percent']].rename(columns={'player_name': 'name', 'k_percent': 'b_k_pct'})
-    return batters.to_dict(orient="records")
+    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=batter%7Cgames=on%7CstartDate={start}%7CendDate={end}&sort_col=k_percent&sort_order=desc"
+    response = requests.get(url, headers=HEADERS)
+    df = pd.read_csv(pd.compat.StringIO(response.text))
+    df = df[df["ab"] >= 200]
+    df = df.nlargest(100, "k_percent")
+    return df[["player_name", "team", "k_percent"]].rename(columns={"k_percent": "b_k_pct"})
 
-# Fetch pitcher strikeout stats from Statcast
-def fetch_pitcher_k_data():
+# Fetch starting pitchers
+def fetch_starting_pitchers():
     start, end = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=pitcher&hfGames=on&hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
-    print("Fetching pitcher CSV...")
-    df = pd.read_csv(url)
-    df = df[df['batters_faced'] >= 50]
-    df = df.head(30)
-    pitchers = df[['player_name', 'k_percent']].rename(columns={'player_name': 'name', 'k_percent': 'p_k_pct'})
-    return pitchers.to_dict(orient="records")
+    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=pitcher%7Cgames=on%7CstartDate={start}%7CendDate={end}&sort_col=k_percent&sort_order=desc"
+    response = requests.get(url, headers=HEADERS)
+    df = pd.read_csv(pd.compat.StringIO(response.text))
+    df = df[df["batters_faced"] >= 50]
+    df = df[df["role"] == "Starting"]
+    return df[["player_name", "team", "k_percent"]].rename(columns={"k_percent": "p_k_pct"})
 
-# Dummy probable matchups
-def fetch_probable_pitchers():
-    return [
-        {"team": "NYY", "name": "Gerrit Cole"},
-        {"team": "LAD", "name": "Tyler Glasnow"},
-        {"team": "ATL", "name": "Max Fried"},
-    ]
-
-# Main logic
+# Match batters to pitchers by team
 def calculate_whiff_scores():
-    batters = fetch_batter_k_data()
-    pitchers = fetch_pitcher_k_data()
-    matchups = fetch_probable_pitchers()
+    batters = fetch_top_batters()
+    pitchers = fetch_starting_pitchers()
 
-    rankings = []
-    for bf in batters:
-        for m in matchups:
-            if bf["team"] == m["team"]:
-                match = next((p for p in pitchers if p["name"] == m["name"]), None)
-                if match:
-                    score = bf["b_k_pct"] + match["p_k_pct"]
-                    rankings.append({
-                        "name": bf["name"],
-                        "team": bf["team"],
-                        "pitcher": match["name"],
-                        "batter_k_pct": round(bf["b_k_pct"], 2),
-                        "pitcher_k_pct": round(match["p_k_pct"], 2),
-                        "whiff_score": round(score, 2)
-                    })
-    return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
+    matchups = []
+    for _, batter in batters.iterrows():
+        team = batter["team"]
+        match = pitchers[pitchers["team"] == team]
+        if not match.empty:
+            pitcher = match.iloc[0]
+            score = batter["b_k_pct"] + pitcher["p_k_pct"]
+            matchups.append({
+                "name": batter["player_name"],
+                "team": team,
+                "pitcher": pitcher["player_name"],
+                "batter_k_pct": round(batter["b_k_pct"], 2),
+                "pitcher_k_pct": round(pitcher["p_k_pct"], 2),
+                "whiff_score": round(score, 2),
+            })
+
+    return sorted(matchups, key=lambda x: -x["whiff_score"])
 
 # Root check
 @app.get("/")
