@@ -4,7 +4,7 @@ class WhiffRankings:
     def __init__(self, date):
         self.date = date
         self.pitchers = self.get_probable_pitchers()
-        self.batters = self.get_batters_over_500_pa()
+        self.batters = self.get_batters_over_200_pa()
         self.pitcher_stats = self.get_pitcher_k_stats()
 
     def get_probable_pitchers(self):
@@ -18,7 +18,6 @@ class WhiffRankings:
                     team = game["teams"][side]
                     pitcher = team.get("probablePitcher")
                     if pitcher:
-                        # Use abbreviation in uppercase for consistent matching
                         team_key = team["team"].get("abbreviation", "").upper()
                         if team_key:
                             pitcher_by_team[team_key] = {
@@ -29,7 +28,7 @@ class WhiffRankings:
 
         return pitcher_by_team
 
-    def get_batters_over_500_pa(self):
+    def get_batters_over_200_pa(self):
         url = "https://statsapi.mlb.com/api/v1/stats?stats=season&group=hitting&limit=3000"
         res = requests.get(url).json()
         players = []
@@ -39,7 +38,7 @@ class WhiffRankings:
             pa = stat.get("plateAppearances", 0)
             so = stat.get("strikeOuts", 0)
 
-            if pa >= 500 and pa > 0:
+            if pa >= 200 and pa > 0:
                 k_percent = round(so / pa * 100, 1)
                 team = row["team"].get("abbreviation", "").upper()
                 if team:
