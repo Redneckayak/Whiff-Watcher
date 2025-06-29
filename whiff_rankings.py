@@ -1,40 +1,20 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 import requests
 import pandas as pd
+from fastapi import FastAPI
+from pydantic import BaseModel
+from datetime import datetime
 from io import StringIO
-import datetime
 
 app = FastAPI()
 
-# Allow all CORS for frontend use
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Output models
-class PlayerRanking(BaseModel):
-    name: str
-    team: str
-    pitcher: str
-    batter_k_pct: float
-    pitcher_k_pct: float
-    whiff_score: float
-
 class WhiffRankings(BaseModel):
-    rankings: list[PlayerRanking]
+    rankings: list
 
-# Helper to get date range YTD
+# Helper to get date range (Opening Day 2025 → Today)
 def get_date_range():
-    start = datetime.date(2025, 3, 20)  # Opening Day 2025
-    end = datetime.date.today()
-    return start, end
+    return "2025-03-20", datetime.today().strftime("%Y-%m-%d")
 
-# Fetch top 100 batters YTD
+# Fetch top 100 batters with at least 200 AB
 def fetch_top_batters():
     start, end = get_date_range()
     url = (
@@ -43,12 +23,12 @@ def fetch_top_batters():
         f"startDate={start}&endDate={end}&sort_col=k_percent&sort_order=desc"
     )
     response = requests.get(url)
-    df = pd.read_csv(StringIO(response.text))
-    df = df[df["ab"] >= 200]  # Filter for qualified batters
+    df = pd.read_csv(StringIO(response.text), on_bad_lines="skip")
+    df = df[df["ab"] >= 200]
     df = df[["player_name", "team", "k_percent"]].rename(columns={"k_percent": "b_k_pct"})
     return df.head(100)
 
-# Fetch probable starting pitchers YTD
+# Fetch starting pitchers with at least 50 batters faced
 def fetch_starting_pitchers():
     start, end = get_date_range()
     url = (
@@ -57,12 +37,12 @@ def fetch_starting_pitchers():
         f"startDate={start}&endDate={end}&sort_col=k_percent&sort_order=desc"
     )
     response = requests.get(url)
-    df = pd.read_csv(StringIO(response.text))
-    df = df[df["batters_faced"] >= 50]  # Filter for starters
+    df = pd.read_csv(StringIO(response.text), on_bad_lines="skip")
+    df = df[df["batters_faced"] >= 50]
     df = df[df["role"] == "Starting"]
     return df[["player_name", "team", "k_percent"]].rename(columns={"k_percent": "p_k_pct"})
 
-# Match batters to pitchers by team
+# Match batters to pitchers by team and calculate Whiff Score
 def calculate_whiff_scores():
     batters = fetch_top_batters()
     pitchers = fetch_starting_pitchers()
