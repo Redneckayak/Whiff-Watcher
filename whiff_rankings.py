@@ -6,7 +6,7 @@ import datetime
 
 app = FastAPI()
 
-# Allow all CORS (safe for dev or public API)
+# Allow all CORS for testing or frontend use
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,7 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Data models
+# Output model
 class PlayerRanking(BaseModel):
     name: str
     team: str
@@ -26,7 +26,7 @@ class PlayerRanking(BaseModel):
 class WhiffRankings(BaseModel):
     rankings: list[PlayerRanking]
 
-# Root route for health check
+# Root endpoint to avoid 404 on /
 @app.get("/")
 def root():
     return {"message": "Whiff Watcher API is live"}
@@ -53,16 +53,21 @@ def fetch_probable_pitchers():
 
     return matchups
 
-# Fetch batter strikeout data
+# Fetch batter strikeout data with error handling
 def fetch_batter_k_data(min_pa=200):
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
-    res = requests.get(url)
-    batters = res.json()["data"]
+    try:
+        res = requests.get(url)
+        data = res.json()
+        batters = data.get("data", [])
+    except Exception as e:
+        print("Failed to fetch batter data:", e)
+        return []
 
     filtered = []
     for b in batters:
         try:
-            pa = int(b["PA"])
+            pa = int(b.get("PA", 0))
             if pa >= min_pa:
                 filtered.append({
                     "name": b["PlayerName"],
@@ -74,11 +79,16 @@ def fetch_batter_k_data(min_pa=200):
 
     return filtered
 
-# Fetch pitcher strikeout data
+# Fetch pitcher strikeout data with error handling
 def fetch_pitcher_k_data():
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
-    res = requests.get(url)
-    pitchers = res.json()["data"]
+    try:
+        res = requests.get(url)
+        data = res.json()
+        pitchers = data.get("data", [])
+    except Exception as e:
+        print("Failed to fetch pitcher data:", e)
+        return []
 
     filtered = []
     for p in pitchers:
@@ -93,7 +103,7 @@ def fetch_pitcher_k_data():
 
     return filtered
 
-# Calculate Whiff Scores
+# Core logic to compute Whiff Scores
 def calculate_whiff_scores():
     batters = fetch_batter_k_data()
     pitchers = fetch_pitcher_k_data()
