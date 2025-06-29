@@ -1,124 +1,119 @@
 import requests
+import datetime
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-class WhiffRankings:
-    def __init__(self, date):
-        self.date = date
-        self.pitchers = self.get_probable_pitchers()
-        self.batters = self.get_batters_over_200_pa()
-        self.pitcher_stats = self.get_pitcher_k_stats()
+app = FastAPI()
 
-    def get_probable_pitchers(self):
-        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={self.date}&hydrate=team,probablePitcher(note)"
-        res = requests.get(url).json()
-        pitcher_by_team = {}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-        for date in res.get("dates", []):
-            for game in date.get("games", []):
-                for side in ['home', 'away']:
-                    team_data = game["teams"].get(side)
-                    team_info = team_data.get("team", {})
-                    team_key = team_info.get("abbreviation", "").upper()
+class PlayerRanking(BaseModel):
+    name: str
+    team: str
+    pitcher: str
+    batter_k_pct: float
+    pitcher_k_pct: float
+    whiff_score: float
 
-                    if not team_key:
-                        print(f"⚠️ Missing team abbreviation for {side} team")
-                        continue
+class WhiffRankings(BaseModel):
+    rankings: list[PlayerRanking]
 
-                    pitcher = team_data.get("probablePitcher")
-                    if pitcher:
-                        pitcher_by_team[team_key] = {
-                            "id": pitcher["id"],
-                            "name": pitcher["fullName"],
-                            "team": team_key
-                        }
-                        print(f"✅ Found probable pitcher for {team_key}: {pitcher['fullName']}")
-                    else:
-                        print(f"🔸 No probable pitcher listed for {team_key}")
+def fetch_probable_pitchers():
+    today = datetime.datetime.now().strftime('%Y-%m-%d')
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=team,probablePitcher(note),linescore"
+    res = requests.get(url)
+    data = res.json()
 
-        return pitcher_by_team
+    matchups = []
+    for date in data.get("dates", []):
+        for game in date.get("games", []):
+            away_team = game["teams"]["away"]["team"]["abbreviation"]
+            home_team = game["teams"]["home"]["team"]["abbreviation"]
+            away_pitcher = game["teams"]["away"].get("probablePitcher", {}).get("fullName")
+            home_pitcher = game["teams"]["home"].get("probablePitcher", {}).get("fullName")
 
-    def get_batters_over_200_pa(self):
-        url = "https://statsapi.mlb.com/api/v1/stats?stats=season&group=hitting&limit=3000"
-        res = requests.get(url).json()
-        players = []
+            if away_pitcher:
+                matchups.append((home_team, away_pitcher))
+            if home_pitcher:
+                matchups.append((away_team, home_pitcher))
 
-        for row in res.get("stats", [])[0].get("splits", []):
-            stat = row.get("stat", {})
-            pa = stat.get("plateAppearances", 0)
-            so = stat.get("strikeOuts", 0)
+    print(f"DEBUG - Total Matchups Found: {len(matchups)}")
+    return matchups
 
-            if pa >= 200 and pa > 0:
-                k_percent = round(so / pa * 100, 1)
-                team = row["team"].get("abbreviation", "").upper()
-                if team:
-                    players.append({
-                        "id": row["player"]["id"],
-                        "name": row["player"]["fullName"],
-                        "team": team,
-                        "pa": pa,
-                        "k_percent": k_percent,
-                        "handedness": row.get("player", {}).get("batSide", {}).get("code", "R")
+def fetch_batter_k_data(min_pa=200):
+    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
+    res = requests.get(url)
+    batters = res.json()["data"]
+
+    print(f"DEBUG - Raw batters fetched: {len(batters)}")
+    filtered = []
+    for b in batters:
+        try:
+            pa = int(b["PA"])
+            if pa >= min_pa:
+                filtered.append({
+                    "name": b["PlayerName"],
+                    "team": b["Team"],
+                    "k_pct": float(b["K%"].replace('%', ''))
+                })
+        except Exception as e:
+            print(f"DEBUG - Skipped batter due to error: {e}")
+
+    print(f"DEBUG - Batters with PA ≥ {min_pa}: {len(filtered)}")
+    return filtered
+
+def fetch_pitcher_k_data():
+    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
+    res = requests.get(url)
+    pitchers = res.json()["data"]
+
+    filtered = []
+    for p in pitchers:
+        try:
+            filtered.append({
+                "name": p["PlayerName"],
+                "team": p["Team"],
+                "k_pct": float(p["K%"].replace('%', ''))
+            })
+        except Exception as e:
+            print(f"DEBUG - Skipped pitcher due to error: {e}")
+
+    print(f"DEBUG - Total Pitchers fetched: {len(filtered)}")
+    return filtered
+
+def calculate_whiff_scores():
+    batters = fetch_batter_k_data()
+    pitchers = fetch_pitcher_k_data()
+    matchups = fetch_probable_pitchers()
+
+    rankings = []
+
+    for b in batters:
+        for team, pitcher_name in matchups:
+            if b["team"] == team:
+                matching_pitchers = [p for p in pitchers if p["name"] == pitcher_name]
+                if matching_pitchers:
+                    p = matching_pitchers[0]
+                    score = b["k_pct"] + p["k_pct"]
+                    rankings.append({
+                        "name": b["name"],
+                        "team": b["team"],
+                        "pitcher": pitcher_name,
+                        "batter_k_pct": b["k_pct"],
+                        "pitcher_k_pct": p["k_pct"],
+                        "whiff_score": round(score, 2)
                     })
 
-        return players
+    print(f"DEBUG - Final Matchups with scores: {len(rankings)}")
+    return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
 
-    def get_pitcher_k_stats(self):
-        pitcher_ids = [str(p["id"]) for p in self.pitchers.values()]
-        if not pitcher_ids:
-            return {}
-
-        ids_str = ",".join(pitcher_ids)
-        url = f"https://statsapi.mlb.com/api/v1/stats?stats=season&group=pitching&playerIds={ids_str}"
-        res = requests.get(url).json()
-        k_stats = {}
-
-        for row in res.get("stats", [])[0].get("splits", []):
-            stat = row.get("stat", {})
-            strikeouts = stat.get("strikeOuts", 0)
-            batters_faced = stat.get("battersFaced", 0)
-
-            if batters_faced > 0:
-                k_percent = round(strikeouts / batters_faced * 100, 1)
-                k_stats[row["player"]["id"]] = {
-                    "k_percent": k_percent,
-                    "handedness": row.get("player", {}).get("pitchHand", {}).get("code", "R")
-                }
-
-        return k_stats
-
-    def get_rankings(self):
-        results = []
-
-        # Debug info
-        print("✅ DEBUG — Total Batters:", len(self.batters))
-        print("✅ DEBUG — Total Pitcher Teams:", len(self.pitchers))
-        print("✅ DEBUG — Pitcher Teams:", list(self.pitchers.keys())[:5])
-        print("✅ DEBUG — Sample Batters:", [b['name'] for b in self.batters[:5]])
-
-        for batter in self.batters:
-            opp_pitcher = self.pitchers.get(batter["team"])
-            if not opp_pitcher:
-                print(f"🔸 Skipping {batter['name']} (no SP for {batter['team']})")
-                continue
-
-            pitcher_stats = self.pitcher_stats.get(opp_pitcher["id"])
-            if not pitcher_stats:
-                print(f"⚠️ Skipping {batter['name']} — no pitcher stats for {opp_pitcher['name']}")
-                continue
-
-            whiff_score = round(batter["k_percent"] + pitcher_stats["k_percent"], 1)
-
-            results.append({
-                "player_name": batter["name"],
-                "team": batter["team"],
-                "batter_k_percent": batter["k_percent"],
-                "plate_appearances": batter["pa"],
-                "handedness": batter["handedness"],
-                "pitcher_name": opp_pitcher["name"],
-                "pitcher_team": opp_pitcher["team"],
-                "pitcher_k_percent": pitcher_stats["k_percent"],
-                "pitcher_handedness": pitcher_stats["handedness"],
-                "whiff_score": whiff_score
-            })
-
-        print("✅ DEBUG — Final Matchups:", len(results))
-        return sorted(results, key=lambda x: x["whiff_score"], reverse=True)
+@app.get("/whiff-rankings", response_model=WhiffRankings)
+def get_whiff_rankings():
+    rankings = calculate_whiff_scores()
+    return {"rankings": rankings}
