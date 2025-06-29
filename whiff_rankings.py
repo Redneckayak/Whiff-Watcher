@@ -3,10 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 import datetime
+import csv
+import io
 
 app = FastAPI()
 
-# Enable CORS for all origins
+# Allow CORS for frontend use
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,67 +28,87 @@ class PlayerRanking(BaseModel):
 class WhiffRankings(BaseModel):
     rankings: list[PlayerRanking]
 
-# Helper to get date range for season
-def get_date_range():
-    return "2025-03-28", datetime.datetime.now().strftime("%Y-%m-%d")
+# Root check
+@app.get("/")
+def root():
+    return {"message": "Whiff Watcher API is live"}
 
-# Fetch batter data from Statcast
+# Get YTD date range
+def get_date_range():
+    today = datetime.date.today()
+    return "2025-03-20", today.strftime("%Y-%m-%d")  # Opening Day to today
+
+# Fetch and parse batter strikeout data from Statcast
 def fetch_batter_k_data():
     start, end = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfPT=&hfAB=&hfBB=&hfSO=&hfPull=&hfCenter=&hfOpp=&hfZ=&hfStadium=&hfBBL=&hfNewZones=&hfGT=R%7C&hfC=&hfSea=2025&hfSit=&player_type=batter&hfOuts=&opponent=&pitcher_throws=&batter_stands=&hfSA=&game_date_gt={start}&game_date_lt={end}&hfInfield=&team=&position=&home_road=&metric_1=K%25&sort_col=K%25&sort_order=desc"
-
+    url = (
+        f"https://baseballsavant.mlb.com/statcast_search/csv?"
+        f"all=true&hfSea=2025&hfFlag=&player_type=batter&hfGames=on&"
+        f"hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
+    )
+    print("Fetching batter CSV from:", url)
     res = requests.get(url)
-    lines = res.text.splitlines()
-    headers = lines[0].split(',')
-    rows = [line.split(',') for line in lines[1:]]
+    decoded = res.content.decode("utf-8")
+    f = io.StringIO(decoded)
+    reader = csv.DictReader(f)
 
-    rankings = []
-    for row in rows:
-        data = dict(zip(headers, row))
+    batters = []
+    for row in reader:
         try:
-            ab = int(data.get("ab", 0))
-            so = int(data.get("so", 0))
+            ab = int(row.get("AB", 0))
+            k_pct = float(row.get("K%", 0.0))
             if ab >= 30:
-                k_pct = round((so / ab) * 100, 1)
-                rankings.append({
-                    "name": data.get("player_name", "Unknown"),
-                    "team": data.get("team", "UNK"),
-                    "k_pct": k_pct
+                batters.append({
+                    "name": row["Player"],
+                    "team": row.get("Team", ""),
+                    "k_pct": k_pct,
                 })
-        except:
+        except Exception as e:
+            print("Error parsing batter row:", row)
             continue
 
-    return rankings
+        if len(batters) >= 200:
+            break
 
-# Fetch pitcher data from Statcast
+    print("Loaded batters:", len(batters))
+    return batters
+
+# Fetch and parse pitcher strikeout data from Statcast
 def fetch_pitcher_k_data():
     start, end = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfPT=&hfAB=&hfBB=&hfSO=&hfPull=&hfCenter=&hfOpp=&hfZ=&hfStadium=&hfBBL=&hfNewZones=&hfGT=R%7C&hfC=&hfSea=2025&hfSit=&player_type=pitcher&hfOuts=&opponent=&pitcher_throws=&batter_stands=&hfSA=&game_date_gt={start}&game_date_lt={end}&hfInfield=&team=&position=&home_road=&metric_1=K%25&sort_col=K%25&sort_order=desc"
-
+    url = (
+        f"https://baseballsavant.mlb.com/statcast_search/csv?"
+        f"all=true&hfSea=2025&hfFlag=&player_type=pitcher&hfGames=on&"
+        f"hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
+    )
+    print("Fetching pitcher CSV from:", url)
     res = requests.get(url)
-    lines = res.text.splitlines()
-    headers = lines[0].split(',')
-    rows = [line.split(',') for line in lines[1:]]
+    decoded = res.content.decode("utf-8")
+    f = io.StringIO(decoded)
+    reader = csv.DictReader(f)
 
-    rankings = []
-    for row in rows:
-        data = dict(zip(headers, row))
+    pitchers = []
+    for row in reader:
         try:
-            bf = int(data.get("batters_faced", 0))
-            so = int(data.get("so", 0))
+            bf = int(row.get("BF", 0))
+            k_pct = float(row.get("K%", 0.0))
             if bf >= 30:
-                k_pct = round((so / bf) * 100, 1)
-                rankings.append({
-                    "name": data.get("player_name", "Unknown"),
-                    "team": data.get("team", "UNK"),
-                    "k_pct": k_pct
+                pitchers.append({
+                    "name": row["Player"],
+                    "team": row.get("Team", ""),
+                    "k_pct": k_pct,
                 })
-        except:
+        except Exception as e:
+            print("Error parsing pitcher row:", row)
             continue
 
-    return rankings
+        if len(pitchers) >= 200:
+            break
 
-# Probable pitcher matchups
+    print("Loaded pitchers:", len(pitchers))
+    return pitchers
+
+# Probable pitcher matchups from MLB API
 def fetch_probable_pitchers():
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=team,probablePitcher(note),linescore"
@@ -106,9 +128,10 @@ def fetch_probable_pitchers():
             if home_pitcher:
                 matchups.append((away_team, home_pitcher))
 
+    print("Loaded matchups:", len(matchups))
     return matchups
 
-# Combine to calculate Whiff Score
+# Core logic
 def calculate_whiff_scores():
     batters = fetch_batter_k_data()
     pitchers = fetch_pitcher_k_data()
@@ -131,14 +154,10 @@ def calculate_whiff_scores():
                         "whiff_score": round(score, 2)
                     })
 
+    print("Total rankings:", len(rankings))
     return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
 
-# Root check
-@app.get("/")
-def root():
-    return {"message": "Whiff Watcher API is live"}
-
-# Rankings endpoint
+# Endpoint
 @app.get("/whiff-rankings", response_model=WhiffRankings)
 def get_whiff_rankings():
     try:
