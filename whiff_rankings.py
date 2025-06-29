@@ -3,10 +3,11 @@ import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
 
+# Initialize FastAPI app
 app = FastAPI()
 
+# CORS setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,6 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Define data models
 class PlayerRanking(BaseModel):
     name: str
     team: str
@@ -22,6 +24,10 @@ class PlayerRanking(BaseModel):
     pitcher_k_pct: float
     whiff_score: float
 
+class WhiffRankings(BaseModel):
+    rankings: list[PlayerRanking]
+
+# Get probable pitchers
 def fetch_probable_pitchers():
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=team,probablePitcher(note),linescore"
@@ -29,8 +35,8 @@ def fetch_probable_pitchers():
     data = res.json()
 
     matchups = []
-    for date in data.get("dates", []):
-        for game in date.get("games", []):
+    for date_data in data.get("dates", []):
+        for game in date_data.get("games", []):
             away_team = game["teams"]["away"]["team"]["abbreviation"]
             home_team = game["teams"]["home"]["team"]["abbreviation"]
             away_pitcher = game["teams"]["away"].get("probablePitcher", {}).get("fullName")
@@ -44,12 +50,12 @@ def fetch_probable_pitchers():
     print(f"DEBUG - Total Matchups Found: {len(matchups)}")
     return matchups
 
-def fetch_batter_k_data(min_pa=200):
+# Get batter K% data from FanGraphs
+def fetch_batter_k_data(min_pa=150):
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
     res = requests.get(url)
     batters = res.json()["data"]
 
-    print(f"DEBUG - Raw batters fetched: {len(batters)}")
     filtered = []
     for b in batters:
         try:
@@ -66,6 +72,7 @@ def fetch_batter_k_data(min_pa=200):
     print(f"DEBUG - Batters with PA ≥ {min_pa}: {len(filtered)}")
     return filtered
 
+# Get pitcher K% data from FanGraphs
 def fetch_pitcher_k_data():
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
     res = requests.get(url)
@@ -85,13 +92,13 @@ def fetch_pitcher_k_data():
     print(f"DEBUG - Total Pitchers fetched: {len(filtered)}")
     return filtered
 
+# Combine data and calculate whiff scores
 def calculate_whiff_scores():
     batters = fetch_batter_k_data()
     pitchers = fetch_pitcher_k_data()
     matchups = fetch_probable_pitchers()
 
     rankings = []
-
     for b in batters:
         for team, pitcher_name in matchups:
             if b["team"] == team:
@@ -111,7 +118,8 @@ def calculate_whiff_scores():
     print(f"DEBUG - Final Matchups with scores: {len(rankings)}")
     return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
 
-@app.get("/whiff-rankings", response_model=List[PlayerRanking])
+# API endpoint
+@app.get("/whiff-rankings", response_model=WhiffRankings)
 def get_whiff_rankings():
     rankings = calculate_whiff_scores()
-    return rankings
+    return {"rankings": rankings}
