@@ -3,12 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 import datetime
-import csv
-import io
+import pandas as pd
 
 app = FastAPI()
 
-# Allow all CORS
+# Allow CORS for frontend use
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,77 +27,76 @@ class PlayerRanking(BaseModel):
 class WhiffRankings(BaseModel):
     rankings: list[PlayerRanking]
 
-# Date range
+# Opening Day to Today
 def get_date_range():
-    return "2025-03-20", datetime.date.today().strftime("%Y-%m-%d")
+    start = datetime.date(2025, 3, 20)
+    end = datetime.date.today()
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
-# Fetch & parse Statcast CSVs
-def fetch_csv(url):
-    response = requests.get(url)
-    content = response.content.decode("utf-8")
-    return list(csv.DictReader(io.StringIO(content)))
-
-# Fetch and filter top 10 batters
+# Fetch batter strikeout stats from Statcast
 def fetch_batter_k_data():
     start, end = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&player_type=batter&hfSea=2025&hfGames=on&hfStartDate={start}&hfEndDate={end}&hfAB=200"
-    rows = fetch_csv(url)
-    batters = []
-    for row in rows[:10]:  # Top 10 only
-        try:
-            k_pct = float(row.get("K%", "0").replace("%", ""))
-            ab = int(row.get("AB", "0"))
-            if ab >= 200:
-                batters.append({"name": row["Player"], "team": row["Team"], "k_pct": k_pct})
-        except:
-            continue
-    return batters
+    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=batter&hfGames=on&hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
+    print("Fetching batter CSV...")
+    df = pd.read_csv(url)
+    df = df[df['ab'] >= 200]
+    df = df.head(100)
+    batters = df[['player_name', 'team', 'k_percent']].rename(columns={'player_name': 'name', 'k_percent': 'b_k_pct'})
+    return batters.to_dict(orient="records")
 
-# Fetch and filter top 10 pitchers
+# Fetch pitcher strikeout stats from Statcast
 def fetch_pitcher_k_data():
     start, end = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&player_type=pitcher&hfSea=2025&hfGames=on&hfStartDate={start}&hfEndDate={end}&hfBF=50"
-    rows = fetch_csv(url)
-    pitchers = []
-    for row in rows[:10]:  # Top 10 only
-        try:
-            k_pct = float(row.get("K%", "0").replace("%", ""))
-            bf = int(row.get("BF", "0"))
-            if bf >= 50:
-                pitchers.append({"name": row["Player"], "team": row["Team"], "k_pct": k_pct})
-        except:
-            continue
-    return pitchers
+    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=pitcher&hfGames=on&hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
+    print("Fetching pitcher CSV...")
+    df = pd.read_csv(url)
+    df = df[df['batters_faced'] >= 50]
+    df = df.head(30)
+    pitchers = df[['player_name', 'k_percent']].rename(columns={'player_name': 'name', 'k_percent': 'p_k_pct'})
+    return pitchers.to_dict(orient="records")
 
-# Match batters vs pitchers by team (test logic)
+# Dummy probable matchups
+def fetch_probable_pitchers():
+    return [
+        {"team": "NYY", "name": "Gerrit Cole"},
+        {"team": "LAD", "name": "Tyler Glasnow"},
+        {"team": "ATL", "name": "Max Fried"},
+    ]
+
+# Main logic
 def calculate_whiff_scores():
     batters = fetch_batter_k_data()
     pitchers = fetch_pitcher_k_data()
+    matchups = fetch_probable_pitchers()
 
     rankings = []
-    for b in batters:
-        for p in pitchers:
-            if b["team"] == p["team"]:  # crude match logic
-                score = b["k_pct"] + p["k_pct"]
-                rankings.append({
-                    "name": b["name"],
-                    "team": b["team"],
-                    "pitcher": p["name"],
-                    "batter_k_pct": b["k_pct"],
-                    "pitcher_k_pct": p["k_pct"],
-                    "whiff_score": round(score, 2)
-                })
+    for bf in batters:
+        for m in matchups:
+            if bf["team"] == m["team"]:
+                match = next((p for p in pitchers if p["name"] == m["name"]), None)
+                if match:
+                    score = bf["b_k_pct"] + match["p_k_pct"]
+                    rankings.append({
+                        "name": bf["name"],
+                        "team": bf["team"],
+                        "pitcher": match["name"],
+                        "batter_k_pct": round(bf["b_k_pct"], 2),
+                        "pitcher_k_pct": round(match["p_k_pct"], 2),
+                        "whiff_score": round(score, 2)
+                    })
     return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
 
+# Root check
 @app.get("/")
 def root():
     return {"message": "Whiff Watcher API is live"}
 
+# Rankings endpoint
 @app.get("/whiff-rankings", response_model=WhiffRankings)
 def get_whiff_rankings():
     try:
         rankings = calculate_whiff_scores()
         return {"rankings": rankings}
     except Exception as e:
-        print("ERROR:", e)
+        print("ERROR in /whiff-rankings:", e)
         return {"rankings": []}
