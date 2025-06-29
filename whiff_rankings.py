@@ -18,13 +18,14 @@ class WhiffRankings:
                     team = game["teams"][side]
                     pitcher = team.get("probablePitcher")
                     if pitcher:
-                        # Use abbreviation if available, otherwise fallback to team name
-                        team_key = team["team"].get("abbreviation") or team["team"].get("name")
-                        pitcher_by_team[team_key] = {
-                            "id": pitcher["id"],
-                            "name": pitcher["fullName"],
-                            "team": team_key
-                        }
+                        # Use abbreviation in uppercase for consistent matching
+                        team_key = team["team"].get("abbreviation", "").upper()
+                        if team_key:
+                            pitcher_by_team[team_key] = {
+                                "id": pitcher["id"],
+                                "name": pitcher["fullName"],
+                                "team": team_key
+                            }
 
         return pitcher_by_team
 
@@ -40,14 +41,16 @@ class WhiffRankings:
 
             if pa >= 500 and pa > 0:
                 k_percent = round(so / pa * 100, 1)
-                players.append({
-                    "id": row["player"]["id"],
-                    "name": row["player"]["fullName"],
-                    "team": row["team"]["abbreviation"],
-                    "pa": pa,
-                    "k_percent": k_percent,
-                    "handedness": row.get("player", {}).get("batSide", {}).get("code", "R")
-                })
+                team = row["team"].get("abbreviation", "").upper()
+                if team:
+                    players.append({
+                        "id": row["player"]["id"],
+                        "name": row["player"]["fullName"],
+                        "team": team,
+                        "pa": pa,
+                        "k_percent": k_percent,
+                        "handedness": row.get("player", {}).get("batSide", {}).get("code", "R")
+                    })
 
         return players
 
