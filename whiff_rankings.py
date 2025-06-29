@@ -32,15 +32,18 @@ class WhiffRankings:
         players = []
 
         for row in res.get("stats", [])[0].get("splits", []):
-            stat = row["stat"]
+            stat = row.get("stat", {})
             pa = stat.get("plateAppearances", 0)
-            if pa >= 500:
+            so = stat.get("strikeOuts", 0)
+
+            if pa >= 500 and pa > 0:
+                k_percent = round(so / pa * 100, 1)
                 players.append({
                     "id": row["player"]["id"],
                     "name": row["player"]["fullName"],
                     "team": row["team"]["abbreviation"],
                     "pa": pa,
-                    "k_percent": round(stat.get("strikeOuts", 0) / pa * 100, 1),
+                    "k_percent": k_percent,
                     "handedness": row.get("player", {}).get("batSide", {}).get("code", "R")
                 })
 
@@ -54,14 +57,16 @@ class WhiffRankings:
         k_stats = {}
 
         for row in res.get("stats", [])[0].get("splits", []):
-            stat = row["stat"]
-            ip = stat.get("inningsPitched", 0)
-            pa = stat.get("battersFaced", 1)
-            k_percent = round(stat.get("strikeOuts", 0) / pa * 100, 1)
-            k_stats[row["player"]["id"]] = {
-                "k_percent": k_percent,
-                "handedness": row.get("player", {}).get("pitchHand", {}).get("code", "R")
-            }
+            stat = row.get("stat", {})
+            strikeouts = stat.get("strikeOuts", 0)
+            batters_faced = stat.get("battersFaced", 0)
+
+            if batters_faced > 0:
+                k_percent = round(strikeouts / batters_faced * 100, 1)
+                k_stats[row["player"]["id"]] = {
+                    "k_percent": k_percent,
+                    "handedness": row.get("player", {}).get("pitchHand", {}).get("code", "R")
+                }
 
         return k_stats
 
@@ -71,6 +76,7 @@ class WhiffRankings:
             opp_pitcher = self.pitchers.get(batter["team"])
             if not opp_pitcher:
                 continue
+
             pitcher_stats = self.pitcher_stats.get(opp_pitcher["id"])
             if not pitcher_stats:
                 continue
