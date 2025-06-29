@@ -6,7 +6,7 @@ import datetime
 
 app = FastAPI()
 
-# Enable CORS
+# Enable CORS for all origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,7 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Output models
+# Models
 class PlayerRanking(BaseModel):
     name: str
     team: str
@@ -26,81 +26,67 @@ class PlayerRanking(BaseModel):
 class WhiffRankings(BaseModel):
     rankings: list[PlayerRanking]
 
-@app.get("/")
-def root():
-    return {"message": "Whiff Watcher API is live"}
-
-# Use fixed start date for YTD
+# Helper to get date range for season
 def get_date_range():
-    start = datetime.date(2025, 3, 28)  # Opening Day 2025
-    end = datetime.date.today()
-    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+    return "2025-03-28", datetime.datetime.now().strftime("%Y-%m-%d")
 
-# Fetch batter K% = SO / AB
+# Fetch batter data from Statcast
 def fetch_batter_k_data():
-    start_date, end_date = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfPT=&hfAB=&hfBBT=&hfPR=&hfZ=&stadium=&hfBBL=&hfNewZones=&hfGT=R%7C&hfC=&hfSea=2025&hfSit=&player_type=batter&hfOuts=&opponent=&pitcher_throws=&batter_stands=&hfSA=&game_date_gt={start_date}&game_date_lt={end_date}&team=&position=&hfRO=&home_road=&hfFlag=&hfPull=&metric_1=&hfInn=&min_pitches=1&min_results=0&group_by=name&sort_col=pitches&player_event_sort=api_p_release_speed&sort_order=desc&min_pas=1&type=batter"
+    start, end = get_date_range()
+    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfPT=&hfAB=&hfBB=&hfSO=&hfPull=&hfCenter=&hfOpp=&hfZ=&hfStadium=&hfBBL=&hfNewZones=&hfGT=R%7C&hfC=&hfSea=2025&hfSit=&player_type=batter&hfOuts=&opponent=&pitcher_throws=&batter_stands=&hfSA=&game_date_gt={start}&game_date_lt={end}&hfInfield=&team=&position=&home_road=&metric_1=K%25&sort_col=K%25&sort_order=desc"
 
-    response = requests.get(url)
-    lines = response.text.splitlines()
-    header = lines[0].split(",")
-    data = lines[1:]
+    res = requests.get(url)
+    lines = res.text.splitlines()
+    headers = lines[0].split(',')
+    rows = [line.split(',') for line in lines[1:]]
 
-    name_idx = header.index("player_name")
-    team_idx = header.index("team")
-    ab_idx = header.index("ab")
-    so_idx = header.index("so")
-
-    batters = []
-    for row in data:
-        cols = row.split(",")
+    rankings = []
+    for row in rows:
+        data = dict(zip(headers, row))
         try:
-            ab = int(cols[ab_idx])
-            so = int(cols[so_idx])
+            ab = int(data.get("ab", 0))
+            so = int(data.get("so", 0))
             if ab >= 30:
-                k_pct = round(100 * so / ab, 2)
-                batters.append({
-                    "name": cols[name_idx],
-                    "team": cols[team_idx],
+                k_pct = round((so / ab) * 100, 1)
+                rankings.append({
+                    "name": data.get("player_name", "Unknown"),
+                    "team": data.get("team", "UNK"),
                     "k_pct": k_pct
                 })
         except:
             continue
-    return batters
 
-# Fetch pitcher K% = SO / BF
+    return rankings
+
+# Fetch pitcher data from Statcast
 def fetch_pitcher_k_data():
-    start_date, end_date = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfPT=&hfAB=&hfBBT=&hfPR=&hfZ=&stadium=&hfBBL=&hfNewZones=&hfGT=R%7C&hfC=&hfSea=2025&hfSit=&player_type=pitcher&hfOuts=&opponent=&pitcher_throws=&batter_stands=&hfSA=&game_date_gt={start_date}&game_date_lt={end_date}&team=&position=&hfRO=&home_road=&hfFlag=&hfPull=&metric_1=&hfInn=&min_pitches=1&min_results=0&group_by=name&sort_col=pitches&player_event_sort=api_p_release_speed&sort_order=desc&min_pas=1&type=pitcher"
+    start, end = get_date_range()
+    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfPT=&hfAB=&hfBB=&hfSO=&hfPull=&hfCenter=&hfOpp=&hfZ=&hfStadium=&hfBBL=&hfNewZones=&hfGT=R%7C&hfC=&hfSea=2025&hfSit=&player_type=pitcher&hfOuts=&opponent=&pitcher_throws=&batter_stands=&hfSA=&game_date_gt={start}&game_date_lt={end}&hfInfield=&team=&position=&home_road=&metric_1=K%25&sort_col=K%25&sort_order=desc"
 
-    response = requests.get(url)
-    lines = response.text.splitlines()
-    header = lines[0].split(",")
-    data = lines[1:]
+    res = requests.get(url)
+    lines = res.text.splitlines()
+    headers = lines[0].split(',')
+    rows = [line.split(',') for line in lines[1:]]
 
-    name_idx = header.index("player_name")
-    team_idx = header.index("team")
-    bf_idx = header.index("batters_faced")
-    so_idx = header.index("so")
-
-    pitchers = []
-    for row in data:
-        cols = row.split(",")
+    rankings = []
+    for row in rows:
+        data = dict(zip(headers, row))
         try:
-            bf = int(cols[bf_idx])
-            so = int(cols[so_idx])
+            bf = int(data.get("batters_faced", 0))
+            so = int(data.get("so", 0))
             if bf >= 30:
-                k_pct = round(100 * so / bf, 2)
-                pitchers.append({
-                    "name": cols[name_idx],
-                    "team": cols[team_idx],
+                k_pct = round((so / bf) * 100, 1)
+                rankings.append({
+                    "name": data.get("player_name", "Unknown"),
+                    "team": data.get("team", "UNK"),
                     "k_pct": k_pct
                 })
         except:
             continue
-    return pitchers
 
-# Get probable pitchers from MLB API
+    return rankings
+
+# Probable pitcher matchups
 def fetch_probable_pitchers():
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=team,probablePitcher(note),linescore"
@@ -119,15 +105,17 @@ def fetch_probable_pitchers():
                 matchups.append((home_team, away_pitcher))
             if home_pitcher:
                 matchups.append((away_team, home_pitcher))
+
     return matchups
 
-# Calculate Whiff Score = batter K% + pitcher K%
+# Combine to calculate Whiff Score
 def calculate_whiff_scores():
     batters = fetch_batter_k_data()
     pitchers = fetch_pitcher_k_data()
     matchups = fetch_probable_pitchers()
 
     rankings = []
+
     for b in batters:
         for team, pitcher_name in matchups:
             if b["team"] == team:
@@ -142,8 +130,15 @@ def calculate_whiff_scores():
                         "pitcher_k_pct": match["k_pct"],
                         "whiff_score": round(score, 2)
                     })
+
     return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
 
+# Root check
+@app.get("/")
+def root():
+    return {"message": "Whiff Watcher API is live"}
+
+# Rankings endpoint
 @app.get("/whiff-rankings", response_model=WhiffRankings)
 def get_whiff_rankings():
     try:
