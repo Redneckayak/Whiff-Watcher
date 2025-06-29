@@ -26,7 +26,7 @@ class PlayerRanking(BaseModel):
 class WhiffRankings(BaseModel):
     rankings: list[PlayerRanking]
 
-# Fetch probable pitchers
+# Fetch probable pitchers from MLB API
 def fetch_probable_pitchers():
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=team,probablePitcher(note),linescore"
@@ -48,11 +48,17 @@ def fetch_probable_pitchers():
 
     return matchups
 
-# Fetch batter K% data
+# Fetch batter strikeout data with debug logging
 def fetch_batter_k_data(min_pa=200):
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
     res = requests.get(url)
-    batters = res.json()["data"]
+
+    try:
+        batters = res.json()["data"]
+    except Exception as e:
+        print("❌ ERROR in fetch_batter_k_data:", e)
+        print("Raw response from Fangraphs (batters):", res.text)
+        return []
 
     filtered = []
     for b in batters:
@@ -69,11 +75,17 @@ def fetch_batter_k_data(min_pa=200):
 
     return filtered
 
-# Fetch pitcher K% data
+# Fetch pitcher strikeout data with debug logging
 def fetch_pitcher_k_data():
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
     res = requests.get(url)
-    pitchers = res.json()["data"]
+
+    try:
+        pitchers = res.json()["data"]
+    except Exception as e:
+        print("❌ ERROR in fetch_pitcher_k_data:", e)
+        print("Raw response from Fangraphs (pitchers):", res.text)
+        return []
 
     filtered = []
     for p in pitchers:
@@ -88,13 +100,11 @@ def fetch_pitcher_k_data():
 
     return filtered
 
-# Calculate whiff scores
+# Core logic to compute Whiff Scores
 def calculate_whiff_scores():
     batters = fetch_batter_k_data()
     pitchers = fetch_pitcher_k_data()
     matchups = fetch_probable_pitchers()
-
-    print("Fetched matchups:", matchups)  # Debug line
 
     rankings = []
 
@@ -123,10 +133,10 @@ def get_whiff_rankings():
         rankings = calculate_whiff_scores()
         return {"rankings": rankings}
     except Exception as e:
-        print("ERROR in /whiff-rankings:", e)
+        print("❌ ERROR in /whiff-rankings:", e)
         return {"rankings": []}
 
-# Optional root endpoint
+# Optional: root endpoint to remove 404 at "/"
 @app.get("/")
 def root():
     return {"message": "Whiff Watcher API is live"}
