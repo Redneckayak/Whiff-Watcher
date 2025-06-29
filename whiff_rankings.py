@@ -8,23 +8,31 @@ class WhiffRankings:
         self.pitcher_stats = self.get_pitcher_k_stats()
 
     def get_probable_pitchers(self):
-        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={self.date}&hydrate=probablePitcher"
+        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={self.date}&hydrate=team,probablePitcher(note)"
         res = requests.get(url).json()
         pitcher_by_team = {}
 
         for date in res.get("dates", []):
             for game in date.get("games", []):
                 for side in ['home', 'away']:
-                    team = game["teams"][side]
-                    pitcher = team.get("probablePitcher")
+                    team_data = game["teams"].get(side)
+                    team_info = team_data.get("team", {})
+                    team_key = team_info.get("abbreviation", "").upper()
+
+                    if not team_key:
+                        print(f"⚠️ Missing team abbreviation for {side} team")
+                        continue
+
+                    pitcher = team_data.get("probablePitcher")
                     if pitcher:
-                        team_key = team["team"].get("abbreviation", "").upper()
-                        if team_key:
-                            pitcher_by_team[team_key] = {
-                                "id": pitcher["id"],
-                                "name": pitcher["fullName"],
-                                "team": team_key
-                            }
+                        pitcher_by_team[team_key] = {
+                            "id": pitcher["id"],
+                            "name": pitcher["fullName"],
+                            "team": team_key
+                        }
+                        print(f"✅ Found probable pitcher for {team_key}: {pitcher['fullName']}")
+                    else:
+                        print(f"🔸 No probable pitcher listed for {team_key}")
 
         return pitcher_by_team
 
