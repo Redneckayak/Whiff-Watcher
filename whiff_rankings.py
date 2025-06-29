@@ -1,53 +1,50 @@
-import requests
-import pandas as pd
 from fastapi import FastAPI
 from pydantic import BaseModel
-from datetime import datetime
+from typing import List
+import requests
+import pandas as pd
 from io import StringIO
+from datetime import datetime
 
 app = FastAPI()
 
 class WhiffRankings(BaseModel):
-    rankings: list
+    rankings: List[dict]
 
-# Helper to get date range (Opening Day 2025 → Today)
+# Opening Day 2025
+OPENING_DAY = datetime(2025, 3, 20)
+
 def get_date_range():
-    return "2025-03-20", datetime.today().strftime("%Y-%m-%d")
+    start = OPENING_DAY.strftime("%Y-%m-%d")
+    end = datetime.today().strftime("%Y-%m-%d")
+    return start, end
 
-# Fetch top 100 batters with at least 200 AB
 def fetch_top_batters():
     start, end = get_date_range()
-    url = (
-        "https://baseballsavant.mlb.com/statcast_search/csv?"
-        f"all=true&hfSea=2025&hfFlag=player_type=batter&hfGames=on&"
-        f"startDate={start}&endDate={end}&sort_col=k_percent&sort_order=desc"
-    )
+    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=batter&hfGames=on&hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
     response = requests.get(url)
-    df = pd.read_csv(StringIO(response.text), on_bad_lines="skip")
+    df = pd.read_csv(StringIO(response.text), sep=",", engine="python", on_bad_lines="skip")
     df = df[df["ab"] >= 200]
-    df = df[["player_name", "team", "k_percent"]].rename(columns={"k_percent": "b_k_pct"})
+    df = df[["player_name", "team", "k_percent"]]
+    df = df.rename(columns={"k_percent": "b_k_pct"})
     return df.head(100)
 
-# Fetch starting pitchers with at least 50 batters faced
 def fetch_starting_pitchers():
     start, end = get_date_range()
-    url = (
-        "https://baseballsavant.mlb.com/statcast_search/csv?"
-        f"all=true&hfSea=2025&hfFlag=player_type=pitcher&hfGames=on&"
-        f"startDate={start}&endDate={end}&sort_col=k_percent&sort_order=desc"
-    )
+    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=pitcher&hfGames=on&hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
     response = requests.get(url)
-    df = pd.read_csv(StringIO(response.text), on_bad_lines="skip")
+    df = pd.read_csv(StringIO(response.text), sep=",", engine="python", on_bad_lines="skip")
     df = df[df["batters_faced"] >= 50]
     df = df[df["role"] == "Starting"]
-    return df[["player_name", "team", "k_percent"]].rename(columns={"k_percent": "p_k_pct"})
+    df = df[["player_name", "team", "k_percent"]]
+    df = df.rename(columns={"k_percent": "p_k_pct"})
+    return df
 
-# Match batters to pitchers by team and calculate Whiff Score
 def calculate_whiff_scores():
     batters = fetch_top_batters()
     pitchers = fetch_starting_pitchers()
-    matchups = []
 
+    matchups = []
     for _, batter in batters.iterrows():
         team = batter["team"]
         match = pitchers[pitchers["team"] == team]
