@@ -3,6 +3,7 @@ import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List
 
 app = FastAPI()
 
@@ -20,9 +21,6 @@ class PlayerRanking(BaseModel):
     batter_k_pct: float
     pitcher_k_pct: float
     whiff_score: float
-
-class WhiffRankings(BaseModel):
-    rankings: list[PlayerRanking]
 
 def fetch_probable_pitchers():
     today = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -113,7 +111,7 @@ def calculate_whiff_scores():
     print(f"DEBUG - Final Matchups with scores: {len(rankings)}")
     return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
 
-@app.get("/whiff-rankings", response_model=WhiffRankings)
+@app.get("/whiff-rankings", response_model=List[PlayerRanking])
 def get_whiff_rankings():
     rankings = calculate_whiff_scores()
-    return {"rankings": rankings}
+    return rankings
