@@ -6,7 +6,7 @@ import datetime
 
 app = FastAPI()
 
-# Allow CORS for testing/front-end access
+# Allow all CORS (safe for dev or public API)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,12 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Root route (optional but friendly)
-@app.get("/")
-def root():
-    return {"message": "Whiff Watcher API is live"}
-
-# Output model
+# Data models
 class PlayerRanking(BaseModel):
     name: str
     team: str
@@ -31,41 +26,12 @@ class PlayerRanking(BaseModel):
 class WhiffRankings(BaseModel):
     rankings: list[PlayerRanking]
 
-# Normalize team abbreviations to Fangraphs full team names
-TEAM_NAME_MAP = {
-    "LAD": "Los Angeles Dodgers",
-    "ATL": "Atlanta Braves",
-    "NYY": "New York Yankees",
-    "BOS": "Boston Red Sox",
-    "CHC": "Chicago Cubs",
-    "CHW": "Chicago White Sox",
-    "NYM": "New York Mets",
-    "PHI": "Philadelphia Phillies",
-    "SF": "San Francisco Giants",
-    "SD": "San Diego Padres",
-    "HOU": "Houston Astros",
-    "CLE": "Cleveland Guardians",
-    "CIN": "Cincinnati Reds",
-    "COL": "Colorado Rockies",
-    "DET": "Detroit Tigers",
-    "KC": "Kansas City Royals",
-    "MIA": "Miami Marlins",
-    "MIL": "Milwaukee Brewers",
-    "MIN": "Minnesota Twins",
-    "OAK": "Oakland Athletics",
-    "SEA": "Seattle Mariners",
-    "STL": "St. Louis Cardinals",
-    "TB": "Tampa Bay Rays",
-    "TEX": "Texas Rangers",
-    "TOR": "Toronto Blue Jays",
-    "WSH": "Washington Nationals",
-    "ARI": "Arizona Diamondbacks",
-    "BAL": "Baltimore Orioles",
-    "PIT": "Pittsburgh Pirates",
-    "LAA": "Los Angeles Angels"
-}
+# Root route for health check
+@app.get("/")
+def root():
+    return {"message": "Whiff Watcher API is live"}
 
-# Get today's matchups and probable pitchers
+# Fetch probable pitchers from MLB API
 def fetch_probable_pitchers():
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=team,probablePitcher(note),linescore"
@@ -81,13 +47,13 @@ def fetch_probable_pitchers():
             home_pitcher = game["teams"]["home"].get("probablePitcher", {}).get("fullName")
 
             if away_pitcher:
-                matchups.append((TEAM_NAME_MAP.get(home_team), away_pitcher))
+                matchups.append((home_team, away_pitcher))
             if home_pitcher:
-                matchups.append((TEAM_NAME_MAP.get(away_team), home_pitcher))
+                matchups.append((away_team, home_pitcher))
 
     return matchups
 
-# Get batter strikeout data from Fangraphs
+# Fetch batter strikeout data
 def fetch_batter_k_data(min_pa=200):
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
     res = requests.get(url)
@@ -108,7 +74,7 @@ def fetch_batter_k_data(min_pa=200):
 
     return filtered
 
-# Get pitcher strikeout data from Fangraphs
+# Fetch pitcher strikeout data
 def fetch_pitcher_k_data():
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
     res = requests.get(url)
@@ -127,7 +93,7 @@ def fetch_pitcher_k_data():
 
     return filtered
 
-# Calculate the Whiff Score for each batter-pitcher matchup
+# Calculate Whiff Scores
 def calculate_whiff_scores():
     batters = fetch_batter_k_data()
     pitchers = fetch_pitcher_k_data()
@@ -153,8 +119,12 @@ def calculate_whiff_scores():
 
     return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
 
-# API endpoint
+# API endpoint with error logging
 @app.get("/whiff-rankings", response_model=WhiffRankings)
 def get_whiff_rankings():
-    rankings = calculate_whiff_scores()
-    return {"rankings": rankings}
+    try:
+        rankings = calculate_whiff_scores()
+        return {"rankings": rankings}
+    except Exception as e:
+        print("ERROR in /whiff-rankings:", e)
+        return {"rankings": []}
