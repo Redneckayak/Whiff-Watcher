@@ -6,7 +6,7 @@ import datetime
 
 app = FastAPI()
 
-# Allow all CORS for testing or frontend use
+# Allow all CORS for frontend use
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,7 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Output model
+# Output models
 class PlayerRanking(BaseModel):
     name: str
     team: str
@@ -26,12 +26,7 @@ class PlayerRanking(BaseModel):
 class WhiffRankings(BaseModel):
     rankings: list[PlayerRanking]
 
-# Root endpoint to avoid 404 on /
-@app.get("/")
-def root():
-    return {"message": "Whiff Watcher API is live"}
-
-# Fetch probable pitchers from MLB API
+# Fetch probable pitchers
 def fetch_probable_pitchers():
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=team,probablePitcher(note),linescore"
@@ -53,21 +48,16 @@ def fetch_probable_pitchers():
 
     return matchups
 
-# Fetch batter strikeout data with error handling
+# Fetch batter K% data
 def fetch_batter_k_data(min_pa=200):
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
-    try:
-        res = requests.get(url)
-        data = res.json()
-        batters = data.get("data", [])
-    except Exception as e:
-        print("Failed to fetch batter data:", e)
-        return []
+    res = requests.get(url)
+    batters = res.json()["data"]
 
     filtered = []
     for b in batters:
         try:
-            pa = int(b.get("PA", 0))
+            pa = int(b["PA"])
             if pa >= min_pa:
                 filtered.append({
                     "name": b["PlayerName"],
@@ -79,16 +69,11 @@ def fetch_batter_k_data(min_pa=200):
 
     return filtered
 
-# Fetch pitcher strikeout data with error handling
+# Fetch pitcher K% data
 def fetch_pitcher_k_data():
     url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
-    try:
-        res = requests.get(url)
-        data = res.json()
-        pitchers = data.get("data", [])
-    except Exception as e:
-        print("Failed to fetch pitcher data:", e)
-        return []
+    res = requests.get(url)
+    pitchers = res.json()["data"]
 
     filtered = []
     for p in pitchers:
@@ -103,11 +88,13 @@ def fetch_pitcher_k_data():
 
     return filtered
 
-# Core logic to compute Whiff Scores
+# Calculate whiff scores
 def calculate_whiff_scores():
     batters = fetch_batter_k_data()
     pitchers = fetch_pitcher_k_data()
     matchups = fetch_probable_pitchers()
+
+    print("Fetched matchups:", matchups)  # Debug line
 
     rankings = []
 
@@ -138,3 +125,8 @@ def get_whiff_rankings():
     except Exception as e:
         print("ERROR in /whiff-rankings:", e)
         return {"rankings": []}
+
+# Optional root endpoint
+@app.get("/")
+def root():
+    return {"message": "Whiff Watcher API is live"}
