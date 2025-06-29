@@ -6,7 +6,7 @@ import datetime
 
 app = FastAPI()
 
-# Allow all CORS for frontend use
+# ✅ Enable all CORS for frontend use (Bubble, etc.)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,7 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Output models
+# ✅ Output models
 class PlayerRanking(BaseModel):
     name: str
     team: str
@@ -26,12 +26,12 @@ class PlayerRanking(BaseModel):
 class WhiffRankings(BaseModel):
     rankings: list[PlayerRanking]
 
-# Root endpoint (optional)
+# ✅ Optional root endpoint to prevent 404 at /
 @app.get("/")
 def root():
     return {"message": "Whiff Watcher API is live"}
 
-# Fetch probable pitchers from MLB API
+# ✅ Fetch probable pitchers from MLB API
 def fetch_probable_pitchers():
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=team,probablePitcher(note),linescore"
@@ -53,19 +53,15 @@ def fetch_probable_pitchers():
 
     return matchups
 
-# Fetch batter strikeout data
+# ✅ Fetch batter strikeout data from Fangraphs (2024 season)
 def fetch_batter_k_data(min_pa=200):
-    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-    res = requests.get(url, headers=headers)
+    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2024&month=1000&season1=2024&startdate=2024-03-01&enddate=2024-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
+    res = requests.get(url)
     data = res.json()
     print("Raw response from Fangraphs (batters):", data)
 
-    batters = data.get("data", [])
     filtered = []
-    for b in batters:
+    for b in data.get("data", []):
         try:
             pa = int(b["PA"])
             if pa >= min_pa:
@@ -79,19 +75,15 @@ def fetch_batter_k_data(min_pa=200):
 
     return filtered
 
-# Fetch pitcher strikeout data
+# ✅ Fetch pitcher strikeout data from Fangraphs (2024 season)
 def fetch_pitcher_k_data():
-    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-    res = requests.get(url, headers=headers)
+    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2024&month=1000&season1=2024&startdate=2024-03-01&enddate=2024-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
+    res = requests.get(url)
     data = res.json()
     print("Raw response from Fangraphs (pitchers):", data)
 
-    pitchers = data.get("data", [])
     filtered = []
-    for p in pitchers:
+    for p in data.get("data", []):
         try:
             filtered.append({
                 "name": p["PlayerName"],
@@ -103,7 +95,7 @@ def fetch_pitcher_k_data():
 
     return filtered
 
-# Core logic to compute Whiff Scores
+# ✅ Core logic to compute whiff scores
 def calculate_whiff_scores():
     batters = fetch_batter_k_data()
     pitchers = fetch_pitcher_k_data()
@@ -129,7 +121,7 @@ def calculate_whiff_scores():
 
     return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
 
-# API endpoint with error logging
+# ✅ FastAPI endpoint
 @app.get("/whiff-rankings", response_model=WhiffRankings)
 def get_whiff_rankings():
     try:
