@@ -18,10 +18,12 @@ class WhiffRankings:
                     team = game["teams"][side]
                     pitcher = team.get("probablePitcher")
                     if pitcher:
-                        pitcher_by_team[team["team"]["abbreviation"]] = {
+                        # Use abbreviation if available, otherwise fallback to team name
+                        team_key = team["team"].get("abbreviation") or team["team"].get("name")
+                        pitcher_by_team[team_key] = {
                             "id": pitcher["id"],
                             "name": pitcher["fullName"],
-                            "team": team["team"]["abbreviation"]
+                            "team": team_key
                         }
 
         return pitcher_by_team
@@ -51,6 +53,9 @@ class WhiffRankings:
 
     def get_pitcher_k_stats(self):
         pitcher_ids = [str(p["id"]) for p in self.pitchers.values()]
+        if not pitcher_ids:
+            return {}
+
         ids_str = ",".join(pitcher_ids)
         url = f"https://statsapi.mlb.com/api/v1/stats?stats=season&group=pitching&playerIds={ids_str}"
         res = requests.get(url).json()
