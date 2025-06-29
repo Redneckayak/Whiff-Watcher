@@ -79,13 +79,22 @@ class WhiffRankings:
 
     def get_rankings(self):
         results = []
+
+        # Debug info
+        print("✅ DEBUG — Total Batters:", len(self.batters))
+        print("✅ DEBUG — Total Pitcher Teams:", len(self.pitchers))
+        print("✅ DEBUG — Pitcher Teams:", list(self.pitchers.keys())[:5])
+        print("✅ DEBUG — Sample Batters:", [b['name'] for b in self.batters[:5]])
+
         for batter in self.batters:
             opp_pitcher = self.pitchers.get(batter["team"])
             if not opp_pitcher:
+                print(f"🔸 Skipping {batter['name']} (no SP for {batter['team']})")
                 continue
 
             pitcher_stats = self.pitcher_stats.get(opp_pitcher["id"])
             if not pitcher_stats:
+                print(f"⚠️ Skipping {batter['name']} — no pitcher stats for {opp_pitcher['name']}")
                 continue
 
             whiff_score = round(batter["k_percent"] + pitcher_stats["k_percent"], 1)
@@ -103,4 +112,5 @@ class WhiffRankings:
                 "whiff_score": whiff_score
             })
 
+        print("✅ DEBUG — Final Matchups:", len(results))
         return sorted(results, key=lambda x: x["whiff_score"], reverse=True)
