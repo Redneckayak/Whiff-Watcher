@@ -1,38 +1,54 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 import pandas as pd
-from datetime import datetime
 import requests
 from io import StringIO
+from datetime import datetime
 
 app = FastAPI()
 
-class WhiffRankings(BaseModel):
-    rankings: list
+class WhiffRanking(BaseModel):
+    name: str
+    team: str
+    pitcher: str
+    batter_k_pct: float
+    pitcher_k_pct: float
+    whiff_score: float
 
-def get_date_range():
-    return "2025-03-20", datetime.today().strftime("%Y-%m-%d")
+class WhiffRankings(BaseModel):
+    rankings: list[WhiffRanking]
+
+# Constants
+START_DATE = "2025-03-20"
+END_DATE = datetime.today().strftime("%Y-%m-%d")
 
 def fetch_top_batters():
-    start, end = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=batter%7Cgamelog%7C&player_type=batter&hfGames=on&hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
+    url = (
+        f"https://baseballsavant.mlb.com/statcast_search/csv?"
+        f"all=true&hfSea=2025&hfFlag=player_type=batter"
+        f"&hfGames=on&hfStartDate={START_DATE}&hfEndDate={END_DATE}"
+        f"&sort_col=k_percent&sort_order=desc"
+    )
     res = requests.get(url)
-    df = pd.read_csv(StringIO(res.text))
-    df = df[df['ab'] >= 200]
+    df = pd.read_csv(StringIO(res.text), engine="python")
+    df = df[df["ab"] > 200]  # Minimum 200 AB
     return df[["player_name", "team", "k_percent"]].rename(columns={"k_percent": "b_k_pct"})
 
 def fetch_starting_pitchers():
-    start, end = get_date_range()
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfSea=2025&hfFlag=player_type=pitcher%7Cgamelog%7C&player_type=pitcher&hfGames=on&hfStartDate={start}&hfEndDate={end}&sort_col=k_percent&sort_order=desc"
+    url = (
+        f"https://baseballsavant.mlb.com/statcast_search/csv?"
+        f"all=true&hfSea=2025&hfFlag=player_type=pitcher"
+        f"&hfGames=on&hfStartDate={START_DATE}&hfEndDate={END_DATE}"
+        f"&sort_col=k_percent&sort_order=desc"
+    )
     res = requests.get(url)
-    df = pd.read_csv(StringIO(res.text))
-    df = df[df['role'] == "Starting"]
-    df = df[df['batters_faced'] >= 50]
+    df = pd.read_csv(StringIO(res.text), engine="python")
+    df = df[(df["batters_faced"] > 50) & (df["role"] == "Starting")]
     return df[["player_name", "team", "k_percent"]].rename(columns={"k_percent": "p_k_pct"})
 
 def calculate_whiff_scores():
-    batters = fetch_top_batters()
-    pitchers = fetch_starting_pitchers()
+    batters = fetch_top_batters().head(100)  # Top 100 K% batters
+    pitchers = fetch_starting_pitchers()     # Up to 30 SPs
 
     matchups = []
     for _, batter in batters.iterrows():
@@ -52,10 +68,12 @@ def calculate_whiff_scores():
 
     return sorted(matchups, key=lambda x: -x["whiff_score"])
 
+# Root check
 @app.get("/")
 def root():
     return {"message": "Whiff Watcher API is live"}
 
+# Rankings endpoint
 @app.get("/whiff-rankings", response_model=WhiffRankings)
 def get_whiff_rankings():
     try:
