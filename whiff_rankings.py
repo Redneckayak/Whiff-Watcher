@@ -55,16 +55,15 @@ def fetch_probable_pitchers():
 
 # Fetch batter strikeout data
 def fetch_batter_k_data(min_pa=200):
-    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2025&month=0&season1=2025&startdate=&enddate=&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
-    res = requests.get(url)
+    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=bat&lg=all&qual=0&type=8&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+    res = requests.get(url, headers=headers)
+    data = res.json()
+    print("Raw response from Fangraphs (batters):", data)
 
-    try:
-        batters = res.json()["data"]
-    except Exception as e:
-        print("❌ ERROR in fetch_batter_k_data:", e)
-        print("Raw response from Fangraphs (batters):", res.text)
-        return []
-
+    batters = data.get("data", [])
     filtered = []
     for b in batters:
         try:
@@ -82,16 +81,15 @@ def fetch_batter_k_data(min_pa=200):
 
 # Fetch pitcher strikeout data
 def fetch_pitcher_k_data():
-    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2025&month=0&season1=2025&startdate=&enddate=&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
-    res = requests.get(url)
+    url = "https://www.fangraphs.com/api/leaders/board?pos=all&stats=pit&lg=all&qual=0&type=2&season=2025&month=1000&season1=2025&startdate=2025-03-01&enddate=2025-12-01&ind=0&team=0&rost=0&age=0&filter=&players=0&pageitems=5000"
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+    res = requests.get(url, headers=headers)
+    data = res.json()
+    print("Raw response from Fangraphs (pitchers):", data)
 
-    try:
-        pitchers = res.json()["data"]
-    except Exception as e:
-        print("❌ ERROR in fetch_pitcher_k_data:", e)
-        print("Raw response from Fangraphs (pitchers):", res.text)
-        return []
-
+    pitchers = data.get("data", [])
     filtered = []
     for p in pitchers:
         try:
@@ -131,12 +129,12 @@ def calculate_whiff_scores():
 
     return sorted(rankings, key=lambda x: x["whiff_score"], reverse=True)
 
-# FastAPI endpoint with error logging
+# API endpoint with error logging
 @app.get("/whiff-rankings", response_model=WhiffRankings)
 def get_whiff_rankings():
     try:
         rankings = calculate_whiff_scores()
         return {"rankings": rankings}
     except Exception as e:
-        print("❌ ERROR in /whiff-rankings:", e)
+        print("ERROR in /whiff-rankings:", e)
         return {"rankings": []}
